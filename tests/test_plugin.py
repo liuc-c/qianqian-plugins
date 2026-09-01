@@ -465,7 +465,7 @@ class SetGroupTitleToolTests(PluginTestCase):
             message_get_by_id=AsyncMock(
                 return_value=self.anchored_message(
                     "msg-quoted",
-                    "“帮我想一个头衔”这句话是什么意思？",
+                    "“随机给我设置一个头衔”这句话礼貌吗？",
                 )
             ),
         )
@@ -484,6 +484,76 @@ class SetGroupTitleToolTests(PluginTestCase):
             result,
         )
         self.api_call.assert_not_awaited()
+
+    async def test_quoted_specified_request_is_only_discussion(self) -> None:
+        plugin = self.make_plugin(
+            api_call=AsyncMock(),
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-quoted-specified",
+                    "“把我的头衔设置为盐田皇帝”这句话礼貌吗？",
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="盐田皇帝",
+            request_message_id="msg-quoted-specified",
+            mode="specified",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertEqual(
+            {"success": False, "content": "设置失败：请求消息未明确授权该头衔"},
+            result,
+        )
+        self.api_call.assert_not_awaited()
+
+    async def test_title_text_is_not_mistaken_for_request_negation(self) -> None:
+        plugin = self.make_plugin(
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-negative-title",
+                    "请把我的头衔设置为“不想”",
+                )
+            )
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="不想",
+            request_message_id="msg-negative-title",
+            mode="specified",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
+
+    async def test_earlier_negation_does_not_override_later_specified_title(
+        self,
+    ) -> None:
+        plugin = self.make_plugin(
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-correction",
+                    "不要盐田皇帝，把我的头衔设置为大王",
+                )
+            )
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-correction",
+            mode="specified",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
 
     async def test_context_stream_and_chat_id_must_match(self) -> None:
         plugin = self.make_plugin(api_call=AsyncMock())

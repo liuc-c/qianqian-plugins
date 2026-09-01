@@ -409,56 +409,58 @@ class SetGroupTitleToolTests(PluginTestCase):
         self.api_call.assert_not_awaited()
         self.logger.exception.assert_called_once()
 
-    async def test_negated_generation_request_is_not_authorized(self) -> None:
+    async def test_generated_mode_does_not_reparse_request_wording(self) -> None:
         plugin = self.make_plugin(
-            api_call=AsyncMock(),
             message_get_by_id=AsyncMock(
                 return_value=self.anchored_message(
-                    "msg-negated",
-                    "不要帮我想一个头衔",
+                    "msg-generated-wording",
+                    "帮我设置一个霸气的头衔",
                 )
-            ),
+            )
         )
 
         result = await plugin.set_group_title_tool(
-            title="盐田皇帝",
-            request_message_id="msg-negated",
+            title="九州执剑人",
+            request_message_id="msg-generated-wording",
             mode="generated",
             stream_id="stream-1",
             chat_id="stream-1",
-            group_id="1000",
             platform="qq",
         )
 
-        self.assertEqual(
-            {"success": False, "content": "设置失败：请求消息未明确授权该头衔"},
-            result,
+        self.assertTrue(result["success"])
+        self.api_call.assert_any_await(
+            "adapter.napcat.group.set_group_special_title",
+            version="1",
+            params={
+                "group_id": "1000",
+                "user_id": "2000",
+                "special_title": "九州执剑人",
+            },
         )
-        self.api_call.assert_not_awaited()
 
-    async def test_title_discussion_is_not_a_specified_setting_request(self) -> None:
+    async def test_specified_mode_requires_title_to_appear_in_request(self) -> None:
         plugin = self.make_plugin(
             api_call=AsyncMock(),
             message_get_by_id=AsyncMock(
                 return_value=self.anchored_message(
-                    "msg-discussion",
-                    "盐田皇帝这个头衔怎么样？",
+                    "msg-title-mismatch",
+                    "请把我的头衔设置为盐田皇帝",
                 )
             ),
         )
 
         result = await plugin.set_group_title_tool(
-            title="盐田皇帝",
-            request_message_id="msg-discussion",
+            title="九州执剑人",
+            request_message_id="msg-title-mismatch",
             mode="specified",
             stream_id="stream-1",
             chat_id="stream-1",
-            group_id="1000",
             platform="qq",
         )
 
         self.assertEqual(
-            {"success": False, "content": "设置失败：请求消息未明确授权该头衔"},
+            {"success": False, "content": "设置失败：指定头衔与请求原文不一致"},
             result,
         )
         self.api_call.assert_not_awaited()
@@ -485,58 +487,6 @@ class SetGroupTitleToolTests(PluginTestCase):
         )
 
         self.assertTrue(result["success"])
-
-    async def test_quoted_generation_request_is_only_discussion(self) -> None:
-        plugin = self.make_plugin(
-            api_call=AsyncMock(),
-            message_get_by_id=AsyncMock(
-                return_value=self.anchored_message(
-                    "msg-quoted",
-                    "“随机给我设置一个头衔”这句话礼貌吗？",
-                )
-            ),
-        )
-
-        result = await plugin.set_group_title_tool(
-            title="盐田皇帝",
-            request_message_id="msg-quoted",
-            mode="generated",
-            stream_id="stream-1",
-            chat_id="stream-1",
-            platform="qq",
-        )
-
-        self.assertEqual(
-            {"success": False, "content": "设置失败：请求消息未明确授权该头衔"},
-            result,
-        )
-        self.api_call.assert_not_awaited()
-
-    async def test_quoted_specified_request_is_only_discussion(self) -> None:
-        plugin = self.make_plugin(
-            api_call=AsyncMock(),
-            message_get_by_id=AsyncMock(
-                return_value=self.anchored_message(
-                    "msg-quoted-specified",
-                    "“把我的头衔设置为盐田皇帝”这句话礼貌吗？",
-                )
-            ),
-        )
-
-        result = await plugin.set_group_title_tool(
-            title="盐田皇帝",
-            request_message_id="msg-quoted-specified",
-            mode="specified",
-            stream_id="stream-1",
-            chat_id="stream-1",
-            platform="qq",
-        )
-
-        self.assertEqual(
-            {"success": False, "content": "设置失败：请求消息未明确授权该头衔"},
-            result,
-        )
-        self.api_call.assert_not_awaited()
 
     async def test_title_text_is_not_mistaken_for_request_negation(self) -> None:
         plugin = self.make_plugin(

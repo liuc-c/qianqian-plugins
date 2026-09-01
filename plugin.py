@@ -2,7 +2,7 @@
 
 import asyncio
 import unicodedata
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -10,39 +10,13 @@ from typing import Any
 from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ToolParameterInfo, ToolParamType
 
-_GENERATED_TITLE_MARKERS = (
-    "随机",
-    "随便",
-    "帮我想",
-    "帮我取",
-    "帮我起",
-    "给我想",
-    "给我取",
-    "给我起",
-)
-_SPECIFIED_TITLE_ACTION_MARKERS = (
-    "设置",
-    "设成",
-    "设为",
-    "改成",
-    "改为",
-    "换成",
-    "换为",
-    "弄成",
-    "叫做",
-    "叫作",
-)
-_TITLE_AUTHORIZATION_NEGATIONS = ("不要", "别", "不用", "不需要", "不想")
-_PAIRED_QUOTES = (("“", "”"), ("‘", "’"), ("「", "」"), ("『", "』"))
-_SYMMETRIC_QUOTES = ('"', "'")
-_NEGATION_LOOKBEHIND_CHARACTERS = 4
-
 _ERROR_ADAPTER_UNAVAILABLE = "设置失败：暂时无法连接 QQ 适配器"
 _ERROR_INVALID_MESSAGE = "设置失败：无法确认请求消息"
 _ERROR_NOT_OWNER = "设置失败：机器人不是当前群群主"
 _ERROR_PLATFORM = "设置失败：仅支持 QQ 群聊"
 _ERROR_QQ_REJECTED = "设置失败：QQ 拒绝了本次头衔修改"
-_ERROR_UNAUTHORIZED_TITLE = "设置失败：请求消息未明确授权该头衔"
+_ERROR_INVALID_MODE = "设置失败：头衔来源模式无效"
+_ERROR_TITLE_MISMATCH = "设置失败：指定头衔与请求原文不一致"
 _TOOL_SUCCESS = "群专属头衔设置成功，无需向用户重复确认。"
 _MESSAGE_LOOKUP_TIMEOUT_SECONDS = 10
 _NAPCAT_TIMEOUT_SECONDS = 20
@@ -116,60 +90,6 @@ def _extract_anchored_requester(
     ):
         return None
     return requester_id, message_text, anchored_group_id
-
-
-def _is_inside_quotes(message_text: str, index: int) -> bool:
-    """判断给定位置是否位于常见成对引号内。"""
-    for opening, closing in _PAIRED_QUOTES:
-        if message_text.rfind(opening, 0, index + 1) > message_text.rfind(
-            closing, 0, index + 1
-        ):
-            return True
-    return any(
-        message_text.count(quote, 0, index + 1) % 2 for quote in _SYMMETRIC_QUOTES
-    )
-
-
-def _iter_unquoted_marker_positions(
-    message_text: str,
-    markers: tuple[str, ...],
-) -> Iterator[int]:
-    """依次给出不在引号内的标记位置。"""
-    for marker in markers:
-        start = 0
-        while (index := message_text.find(marker, start)) >= 0:
-            start = index + len(marker)
-            if not _is_inside_quotes(message_text, index):
-                yield index
-
-
-def _has_generated_title_authorization(message_text: str) -> bool:
-    """查找未被引用且未被近邻否定的生成头衔授权。"""
-    for index in _iter_unquoted_marker_positions(
-        message_text, _GENERATED_TITLE_MARKERS
-    ):
-        prefix = message_text[max(0, index - _NEGATION_LOOKBEHIND_CHARACTERS) : index]
-        if not any(negation in prefix for negation in _TITLE_AUTHORIZATION_NEGATIONS):
-            return True
-    return False
-
-
-def _is_title_authorized(title: str, mode: _TitleMode, message_text: str) -> bool:
-    """判断原消息是否具备可可靠校验的设置授权。"""
-    if mode is _TitleMode.SPECIFIED:
-        if title not in message_text:
-            return False
-        is_question = "?" in message_text or "？" in message_text
-        return not is_question or any(
-            _iter_unquoted_marker_positions(
-                message_text, _SPECIFIED_TITLE_ACTION_MARKERS
-            )
-        )
-    if mode is _TitleMode.GENERATED:
-        return "头衔" in message_text and _has_generated_title_authorization(
-            message_text
-        )
-    return False
 
 
 class PluginSectionConfig(PluginConfigBase):
@@ -373,9 +293,9 @@ class QianqianPlugin(MaiBotPlugin):
         try:
             title_mode = _TitleMode(str(mode).strip().lower())
         except ValueError:
-            return {"success": False, "content": _ERROR_UNAUTHORIZED_TITLE}
-        if not _is_title_authorized(title, title_mode, message_text):
-            return {"success": False, "content": _ERROR_UNAUTHORIZED_TITLE}
+            return {"success": False, "content": _ERROR_INVALID_MODE}
+        if title_mode is _TitleMode.SPECIFIED and title not in message_text:
+            return {"success": False, "content": _ERROR_TITLE_MISMATCH}
 
         result = await self._change_group_title(
             group_id=anchored_group_id,

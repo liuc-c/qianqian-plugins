@@ -6,7 +6,7 @@
 
 - Command：发送 `头衔 <内容>`，把字面内容设置为发送者自己的群专属头衔。
 - Tool：用户明确要求设置头衔时，由 LLM 调用 `qianqian_set_group_title`；用户也可以明确授权 LLM 取一个头衔并立即设置。
-- 安全锚定：Tool 根据请求消息的 `msg_id` 查询原消息，只操作该消息的发送者，不接受 LLM 指定用户或群。
+- 安全锚定：Tool 根据请求消息的 `msg_id` 查询原消息，只操作该消息的发送者，并从原消息取得当前群，不接受 LLM 指定用户或群。
 - 群主校验：仅当机器人 QQ 是当前群群主时执行。
 
 ## 前置条件
@@ -14,7 +14,7 @@
 - MaiBot Host `1.x`
 - `maibot-plugin-sdk` `2.5.1`～`2.x`
 - [MaiBot NapCat Adapter](https://github.com/MaiM-with-u/MaiBot-Napcat-Adapter) `1.0.1`～`1.x`
-- 运行 NapCat 的机器人 QQ 必须是目标群群主
+- 运行 NapCat 的机器人 QQ 必须是当前群群主
 
 本插件把 NapCat Adapter 声明为硬依赖；缺少适配器或版本不兼容时，MaiBot 会阻止插件加载。
 
@@ -74,6 +74,8 @@ git clone https://github.com/liuc-c/qianqian-plugins.git plugins/qianqian-plugin
 ```
 
 对于用户指定的头衔，Tool 会检查标题原文确实存在于请求消息中；对于生成的头衔，请求消息必须包含明确的随机、想、取或起名授权。
+
+Tool 还会要求 Host 注入的 `stream_id` 与 `chat_id` 一致，并只在该聊天流内查询请求消息。MaiBot Host 1.x 目前把上下文字段作为调用参数的缺省值注入，没有向插件提供不可覆盖的只读调用上下文；因此插件可以关闭常见的跨流误选，但绝对的 Host 级强绑定仍需 MaiBot 主程序支持。
 
 ## 限制与失败行为
 

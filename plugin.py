@@ -1,8 +1,10 @@
 """仟仟自用插件。"""
 
+import asyncio
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase, Tool
@@ -18,7 +20,18 @@ _GENERATED_TITLE_MARKERS = (
     "给我取",
     "给我起",
 )
-_GENERATED_TITLE_NEGATIONS = ("不要", "别", "不用", "不需要", "不想")
+_SPECIFIED_TITLE_MARKERS = (
+    "设置",
+    "设成",
+    "设为",
+    "改成",
+    "改为",
+    "换成",
+    "换为",
+    "叫做",
+    "叫作",
+)
+_TITLE_AUTHORIZATION_NEGATIONS = ("不要", "别", "不用", "不需要", "不想")
 
 _ERROR_ADAPTER_UNAVAILABLE = "设置失败：暂时无法连接 QQ 适配器"
 _ERROR_INVALID_MESSAGE = "设置失败：无法确认请求消息"
@@ -27,6 +40,15 @@ _ERROR_PLATFORM = "设置失败：仅支持 QQ 群聊"
 _ERROR_QQ_REJECTED = "设置失败：QQ 拒绝了本次头衔修改"
 _ERROR_UNAUTHORIZED_TITLE = "设置失败：请求消息未明确授权该头衔"
 _TOOL_SUCCESS = "群专属头衔设置成功，无需向用户重复确认。"
+_MESSAGE_LOOKUP_TIMEOUT_SECONDS = 10
+_NAPCAT_TIMEOUT_SECONDS = 20
+
+
+class _TitleMode(StrEnum):
+    """Tool 支持的头衔来源。"""
+
+    SPECIFIED = "specified"
+    GENERATED = "generated"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +62,7 @@ class _TitleChangeResult:
 def _validate_title(value: Any) -> tuple[str, str | None]:
     """规范化头衔，并返回用户可见的校验错误。"""
     if not isinstance(value, str) or any(
-        unicodedata.category(character) in {"Cc", "Cf"} for character in value
+        unicodedata.category(character) == "Cc" for character in value
     ):
         return "", "设置失败：头衔内容无效"
 
@@ -62,9 +84,8 @@ def _extract_anchored_requester(
     *,
     request_message_id: str,
     stream_id: str,
-    group_id: str,
-) -> tuple[str, str] | None:
-    """从已限定会话的消息中提取请求者与原文。"""
+) -> tuple[str, str, str] | None:
+    """校验锚定消息，并提取请求者、原文与当前群。"""
     if not isinstance(message, Mapping):
         return None
     message_info = message.get("message_info")
@@ -81,26 +102,32 @@ def _extract_anchored_requester(
         return None
 
     requester_id = str(user_info.get("user_id", "")).strip()
+    anchored_group_id = str(group_info.get("group_id", "")).strip()
     if (
         not requester_id
+        or not anchored_group_id
         or str(message.get("session_id", "")) != stream_id
         or str(message.get("platform", "")).lower() != "qq"
-        or str(message_info.get("message_id", "")) != request_message_id
-        or str(group_info.get("group_id", "")) != group_id
+        or str(message.get("message_id", "")) != request_message_id
     ):
         return None
-    return requester_id, message_text
+    return requester_id, message_text, anchored_group_id
 
 
-def _is_title_authorized(title: str, mode: str, message_text: str) -> bool:
+def _is_title_authorized(title: str, mode: _TitleMode, message_text: str) -> bool:
     """判断原消息是否授权设置指定或生成的头衔。"""
-    if mode == "specified":
-        return title in message_text
-    if mode == "generated":
+    if any(marker in message_text for marker in _TITLE_AUTHORIZATION_NEGATIONS):
+        return False
+    if mode is _TitleMode.SPECIFIED:
         return (
-            "头衔" in message_text
-            and not any(marker in message_text for marker in _GENERATED_TITLE_NEGATIONS)
-            and any(marker in message_text for marker in _GENERATED_TITLE_MARKERS)
+            title in message_text
+            and "头衔" in message_text
+            and "我" in message_text
+            and any(marker in message_text for marker in _SPECIFIED_TITLE_MARKERS)
+        )
+    if mode is _TitleMode.GENERATED:
+        return "头衔" in message_text and any(
+            marker in message_text for marker in _GENERATED_TITLE_MARKERS
         )
     return False
 
@@ -155,51 +182,52 @@ class QianqianPlugin(MaiBotPlugin):
     ) -> _TitleChangeResult:
         """通过 NapCat Adapter 修改请求者的群专属头衔。"""
         try:
-            login_info = await self.ctx.api.call(
-                "adapter.napcat.system.get_login_info",
-                version="1",
-            )
-            if not isinstance(login_info, Mapping):
-                self.ctx.logger.warning("NapCat 登录信息返回值无效")
-                return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
-            bot_id = str(login_info.get("user_id", "")).strip()
-            if not bot_id:
-                self.ctx.logger.warning("NapCat 登录信息缺少机器人 QQ 号")
-                return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
+            async with asyncio.timeout(_NAPCAT_TIMEOUT_SECONDS):
+                login_info = await self.ctx.api.call(
+                    "adapter.napcat.system.get_login_info",
+                    version="1",
+                )
+                if not isinstance(login_info, Mapping):
+                    self.ctx.logger.warning("NapCat 登录信息返回值无效")
+                    return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
+                bot_id = str(login_info.get("user_id", "")).strip()
+                if not bot_id:
+                    self.ctx.logger.warning("NapCat 登录信息缺少机器人 QQ 号")
+                    return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
 
-            member_info = await self.ctx.api.call(
-                "adapter.napcat.group.get_group_member_info",
-                version="1",
-                group_id=group_id,
-                user_id=bot_id,
-                no_cache=True,
-            )
-            if (
-                not isinstance(member_info, Mapping)
-                or str(member_info.get("group_id", "")) != group_id
-                or str(member_info.get("user_id", "")) != bot_id
-            ):
-                self.ctx.logger.warning("NapCat 群成员信息返回值无效")
-                return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
-            if str(member_info.get("role", "")).lower() != "owner":
-                return _TitleChangeResult(False, _ERROR_NOT_OWNER)
+                member_info = await self.ctx.api.call(
+                    "adapter.napcat.group.get_group_member_info",
+                    version="1",
+                    group_id=group_id,
+                    user_id=bot_id,
+                    no_cache=True,
+                )
+                if (
+                    not isinstance(member_info, Mapping)
+                    or str(member_info.get("group_id", "")) != group_id
+                    or str(member_info.get("user_id", "")) != bot_id
+                ):
+                    self.ctx.logger.warning("NapCat 群成员信息返回值无效")
+                    return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
+                if str(member_info.get("role", "")).lower() != "owner":
+                    return _TitleChangeResult(False, _ERROR_NOT_OWNER)
 
-            set_result = await self.ctx.api.call(
-                "adapter.napcat.group.set_group_special_title",
-                version="1",
-                params={
-                    "group_id": group_id,
-                    "user_id": requester_id,
-                    "special_title": title,
-                },
-            )
-            if (
-                not isinstance(set_result, Mapping)
-                or str(set_result.get("status", "")).lower() != "ok"
-                or set_result.get("retcode") != 0
-            ):
-                self.ctx.logger.warning("QQ 拒绝群专属头衔修改: %r", set_result)
-                return _TitleChangeResult(False, _ERROR_QQ_REJECTED)
+                set_result = await self.ctx.api.call(
+                    "adapter.napcat.group.set_group_special_title",
+                    version="1",
+                    params={
+                        "group_id": group_id,
+                        "user_id": requester_id,
+                        "special_title": title,
+                    },
+                )
+                if (
+                    not isinstance(set_result, Mapping)
+                    or str(set_result.get("status", "")).lower() != "ok"
+                    or set_result.get("retcode") != 0
+                ):
+                    self.ctx.logger.warning("QQ 拒绝群专属头衔修改: %r", set_result)
+                    return _TitleChangeResult(False, _ERROR_QQ_REJECTED)
         except Exception:
             self.ctx.logger.exception("调用 NapCat 群专属头衔 API 失败")
             return _TitleChangeResult(False, _ERROR_ADAPTER_UNAVAILABLE)
@@ -232,7 +260,7 @@ class QianqianPlugin(MaiBotPlugin):
                 param_type=ToolParamType.STRING,
                 description="specified 表示用户指定原文；generated 表示用户授权生成",
                 required=True,
-                enum_values=["specified", "generated"],
+                enum_values=[mode.value for mode in _TitleMode],
             ),
         ],
     )
@@ -242,11 +270,14 @@ class QianqianPlugin(MaiBotPlugin):
         request_message_id: str,
         mode: str,
         stream_id: str = "",
+        chat_id: str = "",
         group_id: str = "",
         platform: str = "",
         **kwargs: Any,
     ) -> dict[str, Any]:
         """根据可信请求消息为请求者设置群专属头衔。"""
+        # 当前群必须由锚定消息派生，不能信任 Tool 调用载荷中的同名字段。
+        del group_id
         del kwargs
         title, error = _validate_title(title)
         if error:
@@ -254,39 +285,47 @@ class QianqianPlugin(MaiBotPlugin):
 
         request_message_id = str(request_message_id).strip()
         stream_id = str(stream_id).strip()
-        group_id = str(group_id).strip()
-        if (
-            str(platform).lower() != "qq"
-            or not request_message_id
-            or not stream_id
-            or not group_id
-        ):
+        chat_id = str(chat_id).strip()
+        if str(platform).lower() != "qq":
+            return {"success": False, "content": _ERROR_PLATFORM}
+        if not request_message_id or not stream_id or stream_id != chat_id:
             return {"success": False, "content": _ERROR_INVALID_MESSAGE}
 
         try:
-            message = await self.ctx.message.get_by_id(
-                request_message_id,
-                stream_id=stream_id,
-                include_binary_data=False,
-            )
+            async with asyncio.timeout(_MESSAGE_LOOKUP_TIMEOUT_SECONDS):
+                message = await self.ctx.message.get_by_id(
+                    request_message_id,
+                    stream_id=stream_id,
+                    include_binary_data=False,
+                )
         except Exception:
             self.ctx.logger.exception("查询群专属头衔请求消息失败")
             return {"success": False, "content": _ERROR_INVALID_MESSAGE}
+
+        if (
+            isinstance(message, Mapping)
+            and str(message.get("platform", "")).strip()
+            and str(message.get("platform", "")).lower() != "qq"
+        ):
+            return {"success": False, "content": _ERROR_PLATFORM}
 
         anchored_request = _extract_anchored_requester(
             message,
             request_message_id=request_message_id,
             stream_id=stream_id,
-            group_id=group_id,
         )
         if anchored_request is None:
             return {"success": False, "content": _ERROR_INVALID_MESSAGE}
-        requester_id, message_text = anchored_request
-        if not _is_title_authorized(title, str(mode).strip().lower(), message_text):
+        requester_id, message_text, anchored_group_id = anchored_request
+        try:
+            title_mode = _TitleMode(str(mode).strip().lower())
+        except ValueError:
+            return {"success": False, "content": _ERROR_UNAUTHORIZED_TITLE}
+        if not _is_title_authorized(title, title_mode, message_text):
             return {"success": False, "content": _ERROR_UNAUTHORIZED_TITLE}
 
         result = await self._change_group_title(
-            group_id=group_id,
+            group_id=anchored_group_id,
             requester_id=requester_id,
             title=title,
         )

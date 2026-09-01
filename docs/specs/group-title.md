@@ -16,12 +16,16 @@
 
 - 注册名为 `qianqian_set_group_title`，保持 deferred，不声明 `core_tool=True`。
 - 参数为 `title`、`request_message_id` 和 `mode`；`mode` 仅允许 `specified` 或 `generated`。
-- LLM 不得提供 `user_id` 或 `group_id`。
-- 插件以当前 `stream_id` 查询 `request_message_id`，验证消息 ID、会话、平台和群均匹配，并从原消息提取请求者。
+- LLM 不得提供 `user_id` 或 `group_id`；插件不信任 Tool 调用载荷中的群号和平台，而从锚定消息派生当前群并再次验证平台。
+- 插件要求 Host 注入的 `stream_id` 与 `chat_id` 一致，再以该 `stream_id` 查询 `request_message_id`，验证消息 ID、会话与平台，并从原消息提取请求者和当前群。
 - `specified` 模式要求 `title` 原样存在于请求消息中。
 - `generated` 模式只接受明确授权随机、想、取或起一个头衔的消息；明显的否定表达不构成授权。
 - 锚定、身份或授权校验失败时关闭失败，不猜测最后发言人，不使用发送者缓存。
 - 成功结果返回给 LLM；Tool 不直接发送成功消息。
+
+### Host 信任边界
+
+MaiBot Host 1.x 当前把 Tool 上下文作为调用载荷的缺省值注入，插件侧拿不到不可覆盖的调用会话对象。因此 `stream_id == chat_id` 是当前可做的闭合校验，但无法从密码学意义上证明两个字段均未被调用载荷覆盖。若 Host 后续提供只读调用上下文，应改用该上下文；若要求绝对强绑定，必须在 MaiBot Host 侧修改，不能只靠本插件完成。
 
 ## 权限与标题规则
 

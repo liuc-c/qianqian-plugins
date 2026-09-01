@@ -20,16 +20,11 @@ _GENERATED_TITLE_MARKERS = (
     "给我取",
     "给我起",
 )
-_SPECIFIED_TITLE_MARKERS = (
-    "设置",
-    "设成",
-    "设为",
-    "改成",
-    "改为",
-    "换成",
-    "换为",
-    "叫做",
-    "叫作",
+_TITLE_DISCUSSION_MARKERS = (
+    "是什么意思",
+    "什么意思",
+    "这个头衔怎么样",
+    "什么头衔比较好",
 )
 _TITLE_AUTHORIZATION_NEGATIONS = ("不要", "别", "不用", "不需要", "不想")
 
@@ -116,15 +111,13 @@ def _extract_anchored_requester(
 
 def _is_title_authorized(title: str, mode: _TitleMode, message_text: str) -> bool:
     """判断原消息是否授权设置指定或生成的头衔。"""
-    if any(marker in message_text for marker in _TITLE_AUTHORIZATION_NEGATIONS):
+    if any(
+        marker in message_text
+        for marker in (*_TITLE_AUTHORIZATION_NEGATIONS, *_TITLE_DISCUSSION_MARKERS)
+    ):
         return False
     if mode is _TitleMode.SPECIFIED:
-        return (
-            title in message_text
-            and "头衔" in message_text
-            and "我" in message_text
-            and any(marker in message_text for marker in _SPECIFIED_TITLE_MARKERS)
-        )
+        return title in message_text
     if mode is _TitleMode.GENERATED:
         return "头衔" in message_text and any(
             marker in message_text for marker in _GENERATED_TITLE_MARKERS

@@ -436,6 +436,55 @@ class SetGroupTitleToolTests(PluginTestCase):
         )
         self.api_call.assert_not_awaited()
 
+    async def test_specified_title_allows_llm_to_understand_request_wording(
+        self,
+    ) -> None:
+        plugin = self.make_plugin(
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-wording",
+                    "请将本人的群专属头衔改为盐田皇帝",
+                )
+            )
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="盐田皇帝",
+            request_message_id="msg-wording",
+            mode="specified",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
+
+    async def test_quoted_generation_request_is_only_discussion(self) -> None:
+        plugin = self.make_plugin(
+            api_call=AsyncMock(),
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-quoted",
+                    "“帮我想一个头衔”这句话是什么意思？",
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="盐田皇帝",
+            request_message_id="msg-quoted",
+            mode="generated",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertEqual(
+            {"success": False, "content": "设置失败：请求消息未明确授权该头衔"},
+            result,
+        )
+        self.api_call.assert_not_awaited()
+
     async def test_context_stream_and_chat_id_must_match(self) -> None:
         plugin = self.make_plugin(api_call=AsyncMock())
 

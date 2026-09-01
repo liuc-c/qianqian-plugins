@@ -276,29 +276,42 @@ class QianqianPlugin(MaiBotPlugin):
 
     @Tool(
         "qianqian_set_group_title",
-        brief_description="在用户明确要求时，为该用户设置当前 QQ 群的群专属头衔",
+        brief_description="执行用户明确授权的本人 QQ 群专属头衔设置",
         detailed_description=(
-            "这是会修改 QQ 群成员资料的有副作用工具。仅当用户明确要求设置自己的群专属头衔，"
-            "或明确授权你取一个头衔并立即设置时调用；讨论、询问建议或替他人设置时不要调用。"
-            "request_message_id 必须复制明确设置请求所在 <message> 的 msg_id。"
+            "触发：当前 QQ 群用户明确要求设置自己的群专属头衔，或明确让你随机、构思或起一个"
+            "头衔；后一种请求视为授权立即设置。"
+            "选择：用户给出最终文本时使用 specified；用户把选名权交给你时使用 generated，可以"
+            "参考当前对话。"
+            "锚定：从承载这次明确请求的用户 <message> 逐字复制 msg_id；该消息决定请求者和当前群。"
+            "完成：只调用一次；success=true 即完成，无需再次调用或重复确认；success=false 时依据"
+            " content 告知用户失败。"
+            "边界：仅讨论头衔、只征求建议而未授权立即设置、含糊表达或替他人设置均不触发。"
         ),
         parameters=[
             ToolParameterInfo(
                 name="title",
                 param_type=ToolParamType.STRING,
-                description="要设置的头衔，最多占 6 个字",
+                description=(
+                    "最终写入的头衔，限 1～6 个 UTF-16 单元；specified 时逐字复制请求原文，"
+                    "generated 时根据用户授权生成"
+                ),
                 required=True,
             ),
             ToolParameterInfo(
                 name="request_message_id",
                 param_type=ToolParamType.STRING,
-                description="明确提出设置请求的原消息 msg_id",
+                description=(
+                    "承载本次明确设置请求的用户 <message> 的 msg_id，逐字复制该值"
+                ),
                 required=True,
             ),
             ToolParameterInfo(
                 name="mode",
                 param_type=ToolParamType.STRING,
-                description="specified 表示用户指定原文；generated 表示用户授权生成",
+                description=(
+                    "specified：用户已给出最终头衔；generated：用户明确让你随机、构思或起名，"
+                    "并把选名权交给你"
+                ),
                 required=True,
                 enum_values=[mode.value for mode in _TitleMode],
             ),

@@ -94,6 +94,33 @@ class PluginContractTests(PluginTestCase):
         self.assertIsNone(pattern.fullmatch("头衔盐田皇帝"))
         self.assertIsNone(pattern.fullmatch("头衔\n盐田皇帝"))
 
+    def test_tool_description_gives_model_a_complete_invocation_contract(
+        self,
+    ) -> None:
+        tool = next(
+            component
+            for component in QianqianPlugin().get_components()
+            if component["type"] == "TOOL"
+        )
+        metadata = tool["metadata"]
+        detailed_description = metadata["detailed_description"]
+        parameters = {
+            parameter["name"]: parameter for parameter in metadata["parameters"]
+        }
+
+        self.assertEqual(
+            "执行用户明确授权的本人 QQ 群专属头衔设置",
+            metadata["brief_description"],
+        )
+        for stage in ("触发：", "选择：", "锚定：", "完成：", "边界："):
+            self.assertIn(stage, detailed_description)
+        self.assertIn("逐字复制请求原文", parameters["title"]["description"])
+        self.assertIn("逐字复制该值", parameters["request_message_id"]["description"])
+        self.assertEqual(
+            ["specified", "generated"],
+            parameters["mode"]["enum_values"],
+        )
+
 
 class SetGroupTitleCommandTests(PluginTestCase):
     async def test_requester_can_set_literal_title_silently_when_bot_is_owner(

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "com.liuc-c.qianqian-plugins",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "name": "仟仟自用插件",
   "description": "为仟仟提供自用命令与工具的 MaiBot 插件。",
   "author": {
@@ -20,7 +20,13 @@
     "min_version": "2.5.1",
     "max_version": "2.99.99"
   },
-  "dependencies": [],
+  "dependencies": [
+    {
+      "type": "plugin",
+      "id": "maibot-team.napcat-adapter",
+      "version_spec": ">=1.0.1,<2.0.0"
+    }
+  ],
   "plugin_type": "tool",
   "display": {
     "icon": {
@@ -29,7 +35,9 @@
     }
   },
   "capabilities": [
-    "send_message"
+    "api.call",
+    "message.get_by_id",
+    "send.text"
   ],
   "i18n": {
     "default_locale": "zh-CN"

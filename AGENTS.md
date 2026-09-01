@@ -8,6 +8,8 @@
 
 **插件开发：** 开始新增或修改功能、组件装饰器、配置、生命周期、Manifest、依赖或发布信息前，先阅读 [MaiBot Vibe Coding 插件开发指南](https://docs.mai-mai.org/plugin/vibe-coding)。涉及具体组件或 SDK API 时，继续阅读该指南链接的对应专题页；以当前官方文档为行为与兼容性依据。
 
+**群专属头衔：** 修改头衔相关术语、Command、Tool、权限或消息锚定时，阅读 `CONTEXT.md` 和 `docs/specs/group-title.md`。
+
 ## 工作流程
 
 1. 先阅读 `_manifest.json`、`plugin.py` 和 README 中与需求相关的部分，确认所有受影响的配置、能力、依赖和用户入口。
@@ -19,7 +21,7 @@
 
 - 插件类继承 `MaiBotPlugin`、声明 `config_model`，并保留 `on_load()`、`on_unload()`、`on_config_update()` 与 `create_plugin()`。
 - 配置使用 `PluginConfigBase` 和 `Field`；保留 `[plugin]` 下的 `enabled` 与 `config_version`。Runner 生成的 `/config.toml` 只保存本地运行值。
-- 用户可见文本使用简体中文。组件名称使用 `qianqian_` 前缀，命令使用 `/qianqian-...`，避免与其他插件冲突。
+- 用户可见文本使用简体中文，组件注册名使用 `qianqian_` 前缀。群专属头衔 Command 固定使用 `头衔 <内容>`；其他新增命令默认使用 `/qianqian-...`，避免与其他插件冲突。
 - Python 包和插件依赖只在 `_manifest.json` 的 `dependencies` 中声明。
 - 机密信息通过运行时配置提供；仓库内容不包含 token、cookie、个人账号、绝对路径或私有 URL。
 - 网络调用设置超时并返回可读错误；后台任务、连接与文件句柄由 `on_unload()` 完整清理。
@@ -32,6 +34,7 @@
 ```bash
 python -m json.tool _manifest.json >/dev/null
 python -m py_compile plugin.py
+python -m unittest discover -s tests
 git diff --check
 ```
 

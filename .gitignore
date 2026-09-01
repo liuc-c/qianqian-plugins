@@ -1,0 +1,28 @@
+# MaiBot 运行时配置（由 Runner 根据 config_model 生成）
+/config.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 本地运行产物
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

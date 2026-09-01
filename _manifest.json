@@ -1,0 +1,37 @@
+{
+  "manifest_version": 2,
+  "id": "com.liuc-c.qianqian-plugins",
+  "version": "0.1.0",
+  "name": "仟仟自用插件",
+  "description": "为仟仟提供自用命令与工具的 MaiBot 插件。",
+  "author": {
+    "name": "liuc-c",
+    "url": "https://github.com/liuc-c"
+  },
+  "license": "UNLICENSED",
+  "urls": {
+    "repository": "https://github.com/liuc-c/qianqian-plugins"
+  },
+  "host_application": {
+    "min_version": "1.0.0",
+    "max_version": "1.99.99"
+  },
+  "sdk": {
+    "min_version": "2.5.1",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "plugin_type": "tool",
+  "display": {
+    "icon": {
+      "type": "emoji",
+      "value": "🐾"
+    }
+  },
+  "capabilities": [
+    "send_message"
+  ],
+  "i18n": {
+    "default_locale": "zh-CN"
+  }
+}

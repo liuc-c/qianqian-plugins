@@ -9,8 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from qianqian.config import RepeaterSectionConfig
-from qianqian.group_title import TITLE_COMMAND_PATTERN
+from .config import RepeaterSectionConfig
+from .group_title import TITLE_COMMAND_PATTERN
 
 _MAX_INTERVAL_SECONDS = 120
 _MAX_CONTENT_LENGTH = 100

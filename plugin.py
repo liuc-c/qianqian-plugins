@@ -1,18 +1,36 @@
 """仟仟自用插件入口。"""
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from maibot_sdk import Command, HookHandler, MaiBotPlugin, Tool
 from maibot_sdk.types import HookMode, ToolParameterInfo, ToolParamType
 
-from qianqian.config import QianqianPluginConfig
-from qianqian.group_title import (
-    TITLE_COMMAND_PATTERN,
-    GroupTitleModule,
-    TitleMode,
-)
-from qianqian.repeater import RepeaterModule
+# Runner 把 plugin.py 作为动态包加载；仓库检查则把它作为顶层模块导入。
+if TYPE_CHECKING:
+    from qianqian.config import QianqianPluginConfig
+    from qianqian.group_title import (
+        TITLE_COMMAND_PATTERN,
+        GroupTitleModule,
+        TitleMode,
+    )
+    from qianqian.repeater import RepeaterModule
+elif __package__:
+    from .qianqian.config import QianqianPluginConfig
+    from .qianqian.group_title import (
+        TITLE_COMMAND_PATTERN,
+        GroupTitleModule,
+        TitleMode,
+    )
+    from .qianqian.repeater import RepeaterModule
+else:
+    from qianqian.config import QianqianPluginConfig
+    from qianqian.group_title import (
+        TITLE_COMMAND_PATTERN,
+        GroupTitleModule,
+        TitleMode,
+    )
+    from qianqian.repeater import RepeaterModule
 
 
 class QianqianPlugin(MaiBotPlugin):

@@ -40,7 +40,7 @@ MaiBot Host 1.x 当前把 Tool 上下文作为调用载荷的缺省值注入，�
 - 通过公开 API `adapter.napcat.system.get_login_info` 查询机器人 QQ。
 - 通过公开 API `adapter.napcat.group.get_group_member_info` 无缓存查询机器人群角色。
 - 通过公开 API `adapter.napcat.group.set_group_special_title` 设置请求者头衔。
-- Manifest 声明 `api.call`、`message.get_by_id`、`send.text`。
+- 头衔功能使用 Manifest 中的 `api.call`、`message.get_by_id`、`send.text`。
 - Manifest 硬依赖 `maibot-team.napcat-adapter >=1.0.1,<2.0.0`。
 
 ## 错误与日志

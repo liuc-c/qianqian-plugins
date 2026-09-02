@@ -70,15 +70,37 @@ class PluginTestCase(IsolatedAsyncioTestCase):
 
 
 class PluginContractTests(PluginTestCase):
-    def test_only_group_title_command_and_tool_are_registered(self) -> None:
+    def test_group_title_and_repeater_components_are_registered(self) -> None:
         components = QianqianPlugin().get_components()
 
         self.assertEqual(
             {
                 ("COMMAND", "qianqian_set_group_title_command"),
+                ("HOOK_HANDLER", "qianqian_repeater"),
                 ("TOOL", "qianqian_set_group_title"),
             },
             {(component["type"], component["name"]) for component in components},
+        )
+
+        repeater = next(
+            component
+            for component in components
+            if component["name"] == "qianqian_repeater"
+        )
+        self.assertEqual(
+            "chat.receive.after_process",
+            repeater["metadata"]["hook"],
+        )
+        self.assertEqual("blocking", repeater["metadata"]["mode"])
+
+    def test_repeater_is_disabled_by_default(self) -> None:
+        self.assertEqual(
+            {
+                "enabled": False,
+                "repeat_probability": 0.5,
+                "enabled_group_ids": [],
+            },
+            QianqianPlugin.build_default_config()["repeater"],
         )
 
     def test_command_requires_spaces_and_never_accepts_newlines(self) -> None:

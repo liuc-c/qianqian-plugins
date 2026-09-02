@@ -16,6 +16,10 @@ _MAX_INTERVAL_SECONDS = 120
 _MAX_CONTENT_LENGTH = 100
 _MIN_DISTINCT_SENDERS = 2
 _TITLE_COMMAND_PATTERN = re.compile(TITLE_COMMAND_PATTERN)
+_MEDIA_PLACEHOLDER_PATTERN = re.compile(
+    r"\[(?:image|emoji|voice|unsupported|xml|share|json|视频|文件)\]",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +180,9 @@ class RepeaterModule:
         sender_id = str(user_info.get("user_id", "")).strip()
         if not sender_id or not stream_id:
             return None, group_id
-        if sender_id == self_id:
+        # 普通机器人消息不能参与队列；群通知即使以机器人为事件主体，
+        # 也要交给内容解析清空该群已有队列。
+        if sender_id == self_id and message.get("is_notify") is not True:
             return None, None
         return _RepeatScope(group_id, stream_id, sender_id), None
 
@@ -186,6 +192,16 @@ class RepeaterModule:
     ) -> _ParsedRepeatMessage | None:
         plain_text = message.get("processed_plain_text")
         if message.get("is_notify") is True:
+            return None
+        message_info = message.get("message_info")
+        additional_config = (
+            message_info.get("additional_config")
+            if isinstance(message_info, Mapping)
+            else None
+        )
+        if isinstance(additional_config, Mapping) and additional_config.get(
+            "platform_card_payloads"
+        ):
             return None
         if isinstance(plain_text, str) and (
             plain_text.lstrip().startswith("/")
@@ -212,6 +228,8 @@ class RepeaterModule:
             segment_type = str(segment.get("type", "")).lower()
             data = segment.get("data")
             if not isinstance(data, str) or segment_type not in {"text", "emoji"}:
+                return None
+            if segment_type == "text" and _MEDIA_PLACEHOLDER_PATTERN.search(data):
                 return None
             text_parts.append(data)
             if segment_type == "text":

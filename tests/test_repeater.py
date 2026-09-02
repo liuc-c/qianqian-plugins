@@ -448,3 +448,66 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             self.assertEqual("continue", result["action"])
 
         self.send_text.assert_not_awaited()
+
+    async def test_napcat_media_placeholders_are_not_repeated_as_text(self) -> None:
+        for placeholder in (
+            "[image]",
+            "[emoji]",
+            "[voice]",
+            "[unsupported]",
+            "[xml]",
+            "[share]",
+            "[json]",
+            "[视频] 文件: demo.mp4",
+            "[文件] demo.zip",
+            "[文件]，链接：https://example.com/demo.zip",
+        ):
+            with self.subTest(placeholder=placeholder):
+                plugin = self.make_plugin()
+                for offset, user_id in enumerate(("2000", "3000")):
+                    result = await plugin.handle_repeater_message(
+                        message=self.message(
+                            placeholder,
+                            user_id=user_id,
+                            timestamp=100.0 + offset,
+                        )
+                    )
+                    self.assertEqual("continue", result["action"])
+                self.send_text.assert_not_awaited()
+
+    async def test_napcat_card_payload_is_not_repeated_as_plain_text(self) -> None:
+        plugin = self.make_plugin()
+        for offset, user_id in enumerate(("2000", "3000")):
+            message = self.message(
+                "分享卡片",
+                user_id=user_id,
+                timestamp=100.0 + offset,
+            )
+            message["message_info"]["additional_config"]["platform_card_payloads"] = [
+                {"type": "json", "data": "{}"}
+            ]
+            result = await plugin.handle_repeater_message(message=message)
+            self.assertEqual("continue", result["action"])
+
+        self.send_text.assert_not_awaited()
+
+    async def test_self_actor_group_notice_still_clears_the_queue(self) -> None:
+        plugin = self.make_plugin()
+        await plugin.handle_repeater_message(
+            message=self.message("哈哈", user_id="2000", timestamp=100.0)
+        )
+        notice = self.message("机器人被禁言", user_id="9000", timestamp=101.0)
+        notice["is_notify"] = True
+        notice["message_info"]["additional_config"] = {
+            "self_id": "9000",
+            "napcat_notice_type": "group_ban",
+            "platform_io_target_group_id": "1000",
+        }
+
+        await plugin.handle_repeater_message(message=notice)
+        after_notice = await plugin.handle_repeater_message(
+            message=self.message("哈哈", user_id="3000", timestamp=102.0)
+        )
+
+        self.assertEqual("continue", after_notice["action"])
+        self.send_text.assert_not_awaited()

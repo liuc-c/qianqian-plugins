@@ -65,7 +65,11 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             "message_info": {
                 "user_info": {"user_id": user_id},
                 "group_info": {"group_id": group_id},
-                "additional_config": {"self_id": "9000"},
+                "additional_config": {
+                    "self_id": "9000",
+                    "napcat_message_type": "group",
+                    "platform_io_target_group_id": group_id,
+                },
             },
         }
 
@@ -412,4 +416,35 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", after_malformed["action"])
+        self.send_text.assert_not_awaited()
+
+    async def test_missing_group_info_clears_the_mapped_group_queue(self) -> None:
+        plugin = self.make_plugin()
+        await plugin.handle_repeater_message(
+            message=self.message("哈哈", user_id="2000", timestamp=100.0)
+        )
+        malformed = self.message("哈哈", user_id="3000", timestamp=101.0)
+        del malformed["message_info"]["group_info"]
+
+        await plugin.handle_repeater_message(message=malformed)
+        after_malformed = await plugin.handle_repeater_message(
+            message=self.message("哈哈", user_id="3000", timestamp=102.0)
+        )
+
+        self.assertEqual("continue", after_malformed["action"])
+        self.send_text.assert_not_awaited()
+
+    async def test_non_napcat_qq_messages_do_not_enter_repeat_queues(self) -> None:
+        plugin = self.make_plugin()
+
+        for offset, user_id in enumerate(("2000", "3000")):
+            message = self.message(
+                "哈哈",
+                user_id=user_id,
+                timestamp=100.0 + offset,
+            )
+            message["message_info"]["additional_config"] = {"self_id": "9000"}
+            result = await plugin.handle_repeater_message(message=message)
+            self.assertEqual("continue", result["action"])
+
         self.send_text.assert_not_awaited()

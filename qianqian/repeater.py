@@ -136,6 +136,8 @@ class RepeaterModule:
         message_info = message.get("message_info")
         if not isinstance(message_info, Mapping):
             return None, self._stream_groups.get(stream_id)
+        if "group_info" not in message_info:
+            return None, self._stream_groups.get(stream_id)
         group_info = message_info.get("group_info")
         if group_info is None:
             return None, None
@@ -149,6 +151,24 @@ class RepeaterModule:
         if enabled_groups and group_id not in enabled_groups:
             return None, None
 
+        additional_config = message_info.get("additional_config")
+        if not isinstance(additional_config, Mapping):
+            return None, None
+        is_napcat_group_message = (
+            str(additional_config.get("napcat_message_type", "")).lower() == "group"
+        )
+        is_napcat_group_notice = bool(
+            str(additional_config.get("napcat_notice_type", "")).strip()
+        )
+        if not is_napcat_group_message and not is_napcat_group_notice:
+            return None, None
+        routed_group_id = str(
+            additional_config.get("platform_io_target_group_id", "")
+        ).strip()
+        self_id = str(additional_config.get("self_id", "")).strip()
+        if routed_group_id != group_id or not self_id:
+            return None, group_id
+
         user_info = message_info.get("user_info")
         if not isinstance(user_info, Mapping):
             return None, group_id
@@ -156,12 +176,8 @@ class RepeaterModule:
         sender_id = str(user_info.get("user_id", "")).strip()
         if not sender_id or not stream_id:
             return None, group_id
-
-        additional_config = message_info.get("additional_config")
-        if isinstance(additional_config, Mapping):
-            self_id = str(additional_config.get("self_id", "")).strip()
-            if self_id and sender_id == self_id:
-                return None, None
+        if sender_id == self_id:
+            return None, None
         return _RepeatScope(group_id, stream_id, sender_id), None
 
     @staticmethod

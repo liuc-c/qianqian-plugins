@@ -27,6 +27,25 @@ class RepeatOutput:
     segments: list[dict[str, Any]] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _RepeatScope:
+    """一条消息所属的 QQ 群复读范围。"""
+
+    group_id: str
+    stream_id: str
+    sender_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedRepeatMessage:
+    """完成严格校验后的可复读内容。"""
+
+    timestamp: float
+    content_key: tuple[tuple[str, str, str], ...]
+    text: str
+    segments: list[dict[str, Any]] | None
+
+
 @dataclass(slots=True)
 class _QueueState:
     """一个群当前的复读队列。"""
@@ -45,10 +64,12 @@ class RepeaterModule:
     def __init__(self) -> None:
         self._states: dict[str, _QueueState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._stream_groups: dict[str, str] = {}
 
     def clear(self) -> None:
         """清空全部复读队列。"""
         self._states.clear()
+        self._stream_groups.clear()
 
     async def evaluate(
         self,
@@ -56,35 +77,38 @@ class RepeaterModule:
         config: RepeaterSectionConfig,
     ) -> RepeatOutput | None:
         """接收一条 Hook 消息，并决定是否需要发送。"""
-        scope = self._resolve_scope(message, config)
+        scope, invalid_group_id = self._resolve_scope(message, config)
         if scope is None:
+            if invalid_group_id:
+                lock = self._locks.setdefault(invalid_group_id, asyncio.Lock())
+                async with lock:
+                    self._states.pop(invalid_group_id, None)
             return None
-        stream_id, sender_id = scope
-        lock = self._locks.setdefault(stream_id, asyncio.Lock())
+        self._stream_groups[scope.stream_id] = scope.group_id
+        lock = self._locks.setdefault(scope.group_id, asyncio.Lock())
         async with lock:
             parsed = self._parse_content(message)
             if parsed is None:
-                self._states.pop(stream_id, None)
+                self._states.pop(scope.group_id, None)
                 return None
-            timestamp, content_key, text, segments = parsed
-            state = self._states.get(stream_id)
+            state = self._states.get(scope.group_id)
             if (
                 state is None
-                or state.content_key != content_key
-                or timestamp - state.last_seen_at > _MAX_INTERVAL_SECONDS
-                or timestamp < state.last_seen_at
+                or state.content_key != parsed.content_key
+                or parsed.timestamp - state.last_seen_at > _MAX_INTERVAL_SECONDS
+                or parsed.timestamp < state.last_seen_at
             ):
-                self._states[stream_id] = _QueueState(
-                    content_key=content_key,
-                    text=text,
-                    segments=segments,
-                    sender_ids={sender_id},
-                    last_seen_at=timestamp,
+                self._states[scope.group_id] = _QueueState(
+                    content_key=parsed.content_key,
+                    text=parsed.text,
+                    segments=parsed.segments,
+                    sender_ids={scope.sender_id},
+                    last_seen_at=parsed.timestamp,
                 )
                 return None
 
-            state.last_seen_at = timestamp
-            state.sender_ids.add(sender_id)
+            state.last_seen_at = parsed.timestamp
+            state.sender_ids.add(scope.sender_id)
             if state.decided or len(state.sender_ids) < _MIN_DISTINCT_SENDERS:
                 return None
 
@@ -92,58 +116,58 @@ class RepeaterModule:
             if random.random() >= config.repeat_probability:
                 return None
             return RepeatOutput(
-                stream_id=stream_id,
+                stream_id=scope.stream_id,
                 text=state.text,
                 segments=state.segments,
             )
 
-    @staticmethod
     def _resolve_scope(
+        self,
         message: Any,
         config: RepeaterSectionConfig,
-    ) -> tuple[str, str] | None:
+    ) -> tuple[_RepeatScope | None, str | None]:
         """确认消息属于启用群且并非机器人自身。"""
         if not config.enabled or not isinstance(message, Mapping):
-            return None
+            return None, None
         if str(message.get("platform", "")).lower() != "qq":
-            return None
+            return None, None
 
+        stream_id = str(message.get("session_id", "")).strip()
         message_info = message.get("message_info")
         if not isinstance(message_info, Mapping):
-            return None
+            return None, self._stream_groups.get(stream_id)
         group_info = message_info.get("group_info")
-        user_info = message_info.get("user_info")
-        if not isinstance(group_info, Mapping) or not isinstance(user_info, Mapping):
-            return None
+        if group_info is None:
+            return None, None
+        if not isinstance(group_info, Mapping):
+            return None, self._stream_groups.get(stream_id)
 
         group_id = str(group_info.get("group_id", "")).strip()
-        sender_id = str(user_info.get("user_id", "")).strip()
-        stream_id = str(message.get("session_id", "")).strip()
-        if not group_id or not sender_id or not stream_id:
-            return None
+        if not group_id:
+            return None, self._stream_groups.get(stream_id)
         enabled_groups = {str(value).strip() for value in config.enabled_group_ids}
         if enabled_groups and group_id not in enabled_groups:
-            return None
+            return None, None
+
+        user_info = message_info.get("user_info")
+        if not isinstance(user_info, Mapping):
+            return None, group_id
+
+        sender_id = str(user_info.get("user_id", "")).strip()
+        if not sender_id or not stream_id:
+            return None, group_id
 
         additional_config = message_info.get("additional_config")
         if isinstance(additional_config, Mapping):
             self_id = str(additional_config.get("self_id", "")).strip()
             if self_id and sender_id == self_id:
-                return None
-        return stream_id, sender_id
+                return None, None
+        return _RepeatScope(group_id, stream_id, sender_id), None
 
     @staticmethod
     def _parse_content(
         message: Any,
-    ) -> (
-        tuple[
-            float,
-            tuple[tuple[str, str, str], ...],
-            str,
-            list[dict[str, Any]] | None,
-        ]
-        | None
-    ):
+    ) -> _ParsedRepeatMessage | None:
         plain_text = message.get("processed_plain_text")
         if message.get("is_notify") is True:
             return None
@@ -190,9 +214,9 @@ class RepeaterModule:
                     decoded_binary = base64.b64decode(binary_data, validate=True)
                 except (ValueError, TypeError):
                     decoded_binary = None
-            if not emoji_hash and not decoded_binary:
+            if not decoded_binary:
                 return None
-            identity = emoji_hash or hashlib.sha256(decoded_binary or b"").hexdigest()
+            identity = emoji_hash or hashlib.sha256(decoded_binary).hexdigest()
             content_parts.append(("emoji", data, identity))
             outbound_emoji: dict[str, Any] = {"type": "emoji", "data": data}
             if emoji_hash:
@@ -205,4 +229,9 @@ class RepeaterModule:
         if (not text and not contains_emoji) or content_length > _MAX_CONTENT_LENGTH:
             return None
         segments = outbound_segments if contains_emoji else None
-        return timestamp, tuple(content_parts), text, segments
+        return _ParsedRepeatMessage(
+            timestamp=timestamp,
+            content_key=tuple(content_parts),
+            text=text,
+            segments=segments,
+        )

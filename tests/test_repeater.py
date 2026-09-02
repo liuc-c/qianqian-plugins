@@ -351,3 +351,65 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(["abort", "continue"], [item["action"] for item in results])
         self.send_text.assert_awaited_once_with("哈哈", "qq-group-1000")
+
+    async def test_queue_identity_is_the_qq_group_not_the_stream(self) -> None:
+        plugin = self.make_plugin()
+
+        await plugin.handle_repeater_message(
+            message=self.message(
+                "哈哈",
+                user_id="2000",
+                timestamp=100.0,
+                stream_id="qq-account-a-group-1000",
+            )
+        )
+        result = await plugin.handle_repeater_message(
+            message=self.message(
+                "哈哈",
+                user_id="3000",
+                timestamp=101.0,
+                stream_id="qq-account-b-group-1000",
+            )
+        )
+
+        self.assertEqual("abort", result["action"])
+        self.send_text.assert_awaited_once_with(
+            "哈哈",
+            "qq-account-b-group-1000",
+        )
+
+    async def test_qq_emoji_without_valid_binary_is_never_repeated(self) -> None:
+        plugin = self.make_plugin()
+        incomplete_emoji = [
+            {"type": "emoji", "data": "[动画表情]", "hash": "emoji-hash"}
+        ]
+
+        for offset, user_id in enumerate(("2000", "3000")):
+            result = await plugin.handle_repeater_message(
+                message=self.message(
+                    "[动画表情]",
+                    user_id=user_id,
+                    timestamp=100.0 + offset,
+                    raw_message=incomplete_emoji,
+                )
+            )
+            self.assertEqual("continue", result["action"])
+
+        self.send_hybrid.assert_not_awaited()
+        self.send_text.assert_not_awaited()
+
+    async def test_malformed_group_message_clears_the_existing_queue(self) -> None:
+        plugin = self.make_plugin()
+        await plugin.handle_repeater_message(
+            message=self.message("哈哈", user_id="2000", timestamp=100.0)
+        )
+        malformed = self.message("哈哈", user_id="3000", timestamp=101.0)
+        malformed["message_info"]["user_info"] = None
+
+        await plugin.handle_repeater_message(message=malformed)
+        after_malformed = await plugin.handle_repeater_message(
+            message=self.message("哈哈", user_id="3000", timestamp=102.0)
+        )
+
+        self.assertEqual("continue", after_malformed["action"])
+        self.send_text.assert_not_awaited()

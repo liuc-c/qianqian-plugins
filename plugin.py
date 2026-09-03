@@ -94,7 +94,9 @@ class QianqianPlugin(MaiBotPlugin):
         if not succeeded:
             self.ctx.logger.warning("发送 QQ 群复读消息失败")
             return {"action": "continue", "modified_kwargs": kwargs}
-        return {"action": "abort"}
+        # 复读只额外发送一条消息，不消费触发消息；后续 Command、Planner 和 LLM
+        # 仍应看到原始参数并照常处理。
+        return {"action": "continue", "modified_kwargs": kwargs}
 
     @Tool(
         "qianqian_set_group_title",

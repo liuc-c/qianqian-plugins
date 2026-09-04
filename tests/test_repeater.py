@@ -32,7 +32,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
         plugin.set_plugin_config(
             {
-                "plugin": {"enabled": True, "config_version": "0.3.0"},
+                "plugin": {"enabled": True, "config_version": "0.4.0"},
                 "repeater": {
                     "enabled": True,
                     "repeat_probability": repeat_probability,

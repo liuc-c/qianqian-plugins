@@ -16,7 +16,12 @@ class PluginTestCase(IsolatedAsyncioTestCase):
         if api_name == "adapter.napcat.system.get_login_info":
             return {"user_id": 9000, "nickname": "仟仟"}
         if api_name == "adapter.napcat.group.get_group_member_info":
-            return {"group_id": 1000, "user_id": 9000, "role": "owner"}
+            user_id = int(kwargs["user_id"])
+            return {
+                "group_id": int(kwargs["group_id"]),
+                "user_id": user_id,
+                "role": "owner" if user_id == 9000 else "member",
+            }
         if api_name == "adapter.napcat.group.set_group_special_title":
             return {"status": "ok", "retcode": 0}
         self.fail(f"调用了未预期的 API: {api_name}")
@@ -30,12 +35,14 @@ class PluginTestCase(IsolatedAsyncioTestCase):
         group_id: int = 1000,
         user_id: int = 2000,
         platform: str = "qq",
+        raw_message: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "message_id": message_id,
             "session_id": stream_id,
             "platform": platform,
             "processed_plain_text": text,
+            "raw_message": raw_message or [],
             "message_info": {
                 "user_info": {"user_id": user_id},
                 "group_info": {"group_id": group_id},
@@ -49,6 +56,8 @@ class PluginTestCase(IsolatedAsyncioTestCase):
         message_get_by_id: AsyncMock | None = None,
         send_text: AsyncMock | None = None,
         logger: Mock | None = None,
+        allow_all_members_to_set_others: bool = True,
+        allowed_requester_ids: list[str] | None = None,
     ) -> QianqianPlugin:
         self.api_call = api_call or AsyncMock(side_effect=self.successful_api_call)
         self.message_get_by_id = message_get_by_id or AsyncMock()
@@ -66,6 +75,15 @@ class PluginTestCase(IsolatedAsyncioTestCase):
                 ),
             )
         )
+        config = plugin.build_default_config()
+        config["plugin"]["enabled"] = True
+        config["group_title"]["allow_all_members_to_set_others"] = (
+            allow_all_members_to_set_others
+        )
+        config["group_title"]["allowed_requester_ids"] = (
+            allowed_requester_ids or []
+        )
+        plugin.set_plugin_config(config)
         return plugin
 
 
@@ -103,6 +121,15 @@ class PluginContractTests(PluginTestCase):
             QianqianPlugin.build_default_config()["repeater"],
         )
 
+    def test_setting_other_members_is_denied_by_default(self) -> None:
+        self.assertEqual(
+            {
+                "allow_all_members_to_set_others": False,
+                "allowed_requester_ids": [],
+            },
+            QianqianPlugin.build_default_config()["group_title"],
+        )
+
     def test_command_requires_spaces_and_never_accepts_newlines(self) -> None:
         command = next(
             component
@@ -131,10 +158,17 @@ class PluginContractTests(PluginTestCase):
         }
 
         self.assertEqual(
-            "执行用户明确授权的本人 QQ 群专属头衔设置",
+            "执行用户明确要求的本人或指定成员 QQ 群专属头衔设置",
             metadata["brief_description"],
         )
-        for stage in ("触发：", "选择：", "锚定：", "完成：", "边界："):
+        for stage in (
+            "触发：",
+            "选择：",
+            "锚定：",
+            "目标：",
+            "完成：",
+            "边界：",
+        ):
             self.assertIn(stage, detailed_description)
         self.assertIn("逐字复制请求原文", parameters["title"]["description"])
         self.assertIn("逐字复制该值", parameters["request_message_id"]["description"])
@@ -142,6 +176,13 @@ class PluginContractTests(PluginTestCase):
             ["specified", "generated"],
             parameters["mode"]["enum_values"],
         )
+        self.assertEqual(
+            ["requester", "mentioned", "named"],
+            parameters["target_mode"]["enum_values"],
+        )
+        self.assertFalse(parameters["target_name"]["required"])
+        self.assertIn("记忆或黑话", parameters["target_name"]["description"])
+        self.assertIn("不要求逐字出现在请求原文", parameters["target_name"]["description"])
 
 
 class SetGroupTitleCommandTests(PluginTestCase):
@@ -346,6 +387,329 @@ class SetGroupTitleToolTests(PluginTestCase):
                 "special_title": "盐田皇帝",
             },
         )
+
+    async def test_unique_mentioned_member_is_targeted_from_anchored_segments(
+        self,
+    ) -> None:
+        plugin = self.make_plugin(
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-mentioned",
+                    "@方仟仟 给 @箫阮阮 改头衔为拉屎大王",
+                    raw_message=[
+                        {
+                            "type": "at",
+                            "data": {"target_user_id": "9000"},
+                        },
+                        {"type": "text", "data": " 给 "},
+                        {
+                            "type": "at",
+                            "data": {"target_user_id": "3000"},
+                        },
+                        {"type": "text", "data": " 改头衔为拉屎大王"},
+                    ],
+                )
+            )
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="拉屎大王",
+            request_message_id="msg-mentioned",
+            mode="specified",
+            target_mode="mentioned",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
+        self.api_call.assert_any_await(
+            "adapter.napcat.group.set_group_special_title",
+            version="1",
+            params={
+                "group_id": "1000",
+                "user_id": "3000",
+                "special_title": "拉屎大王",
+            },
+        )
+
+    async def test_mentioned_mode_rejects_multiple_non_bot_members(self) -> None:
+        plugin = self.make_plugin(
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-many-mentioned",
+                    "@方仟仟 给 @箫阮阮 和 @另一人 改头衔为大王",
+                    raw_message=[
+                        {"type": "at", "data": {"target_user_id": "9000"}},
+                        {"type": "at", "data": {"target_user_id": "3000"}},
+                        {"type": "at", "data": {"target_user_id": "4000"}},
+                    ],
+                )
+            )
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-many-mentioned",
+            mode="specified",
+            target_mode="mentioned",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertEqual(
+            {
+                "success": False,
+                "content": "设置失败：请在请求中只 @ 一位要修改头衔的群成员",
+            },
+            result,
+        )
+        self.assertFalse(
+            any(
+                call.args[0]
+                == "adapter.napcat.group.set_group_special_title"
+                for call in self.api_call.await_args_list
+            )
+        )
+
+    async def test_setting_another_member_requires_requester_authorization(
+        self,
+    ) -> None:
+        plugin = self.make_plugin(
+            allow_all_members_to_set_others=False,
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-unauthorized-target",
+                    "@方仟仟 给 @箫阮阮 改头衔为大王",
+                    raw_message=[
+                        {"type": "at", "data": {"target_user_id": "9000"}},
+                        {"type": "at", "data": {"target_user_id": "3000"}},
+                    ],
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-unauthorized-target",
+            mode="specified",
+            target_mode="mentioned",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertEqual(
+            {
+                "success": False,
+                "content": "设置失败：你没有修改其他成员头衔的权限",
+            },
+            result,
+        )
+
+    async def test_allowed_requester_can_set_another_members_title(self) -> None:
+        plugin = self.make_plugin(
+            allow_all_members_to_set_others=False,
+            allowed_requester_ids=["2000"],
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-authorized-target",
+                    "@方仟仟 给 @箫阮阮 改头衔为大王",
+                    raw_message=[
+                        {"type": "at", "data": {"target_user_id": "9000"}},
+                        {"type": "at", "data": {"target_user_id": "3000"}},
+                    ],
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-authorized-target",
+            mode="specified",
+            target_mode="mentioned",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
+
+    async def test_llm_resolved_alias_is_confirmed_against_group_member(self) -> None:
+        async def call_api(api_name: str, **kwargs: Any) -> Any:
+            if api_name == "adapter.napcat.system.get_login_info":
+                return {"user_id": 9000}
+            if api_name == "adapter.napcat.group.get_group_member_info":
+                return {"group_id": 1000, "user_id": 9000, "role": "owner"}
+            if api_name == "adapter.napcat.group.get_group_member_list":
+                return [
+                    {"user_id": 3000, "card": "箫阮阮", "nickname": "软软"},
+                    {"user_id": 4000, "card": "另一人", "nickname": "小明"},
+                ]
+            if api_name == "adapter.napcat.group.set_group_special_title":
+                return {"status": "ok", "retcode": 0}
+            self.fail(f"调用了未预期的 API: {api_name}")
+
+        plugin = self.make_plugin(
+            api_call=AsyncMock(side_effect=call_api),
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-named",
+                    "@方仟仟 给阮阮改头衔为拉屎大王",
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="拉屎大王",
+            request_message_id="msg-named",
+            mode="specified",
+            target_mode="named",
+            target_name="箫阮阮",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
+        self.api_call.assert_any_await(
+            "adapter.napcat.group.get_group_member_list",
+            version="1",
+            group_id="1000",
+            no_cache=True,
+        )
+        self.api_call.assert_any_await(
+            "adapter.napcat.group.set_group_special_title",
+            version="1",
+            params={
+                "group_id": "1000",
+                "user_id": "3000",
+                "special_title": "拉屎大王",
+            },
+        )
+
+    async def test_named_mode_rejects_duplicate_group_names(self) -> None:
+        async def call_api(api_name: str, **kwargs: Any) -> Any:
+            if api_name == "adapter.napcat.system.get_login_info":
+                return {"user_id": 9000}
+            if api_name == "adapter.napcat.group.get_group_member_info":
+                return {"group_id": 1000, "user_id": 9000, "role": "owner"}
+            if api_name == "adapter.napcat.group.get_group_member_list":
+                return [
+                    {"user_id": 3000, "card": "箫阮阮", "nickname": "软软"},
+                    {"user_id": 4000, "card": "箫阮阮", "nickname": "小明"},
+                ]
+            self.fail(f"昵称重名时不应继续调用 API: {api_name}")
+
+        plugin = self.make_plugin(
+            api_call=AsyncMock(side_effect=call_api),
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-duplicate-name",
+                    "@方仟仟 给箫阮阮改头衔为大王",
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-duplicate-name",
+            mode="specified",
+            target_mode="named",
+            target_name="箫阮阮",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertEqual(
+            {
+                "success": False,
+                "content": (
+                    "设置失败：找到多位同名群成员，请让用户重新发送消息并 @ 要修改的成员进行二次确认"
+                ),
+            },
+            result,
+        )
+
+    async def test_group_card_match_takes_priority_over_qq_nickname(self) -> None:
+        async def call_api(api_name: str, **kwargs: Any) -> Any:
+            if api_name == "adapter.napcat.system.get_login_info":
+                return {"user_id": 9000}
+            if api_name == "adapter.napcat.group.get_group_member_info":
+                return {"group_id": 1000, "user_id": 9000, "role": "owner"}
+            if api_name == "adapter.napcat.group.get_group_member_list":
+                return [
+                    {"user_id": 3000, "card": "箫阮阮", "nickname": "软软"},
+                    {"user_id": 4000, "card": "另一人", "nickname": "箫阮阮"},
+                ]
+            if api_name == "adapter.napcat.group.set_group_special_title":
+                return {"status": "ok", "retcode": 0}
+            self.fail(f"调用了未预期的 API: {api_name}")
+
+        plugin = self.make_plugin(
+            api_call=AsyncMock(side_effect=call_api),
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-card-priority",
+                    "@方仟仟 给箫阮阮改头衔为大王",
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-card-priority",
+            mode="specified",
+            target_mode="named",
+            target_name="箫阮阮",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertTrue(result["success"])
+        self.api_call.assert_any_await(
+            "adapter.napcat.group.set_group_special_title",
+            version="1",
+            params={
+                "group_id": "1000",
+                "user_id": "3000",
+                "special_title": "大王",
+            },
+        )
+
+    async def test_named_mode_requires_a_resolved_member_name(self) -> None:
+        plugin = self.make_plugin(
+            api_call=AsyncMock(),
+            message_get_by_id=AsyncMock(
+                return_value=self.anchored_message(
+                    "msg-name-missing",
+                    "@方仟仟 给阮阮改头衔为大王",
+                )
+            ),
+        )
+
+        result = await plugin.set_group_title_tool(
+            title="大王",
+            request_message_id="msg-name-missing",
+            mode="specified",
+            target_mode="named",
+            target_name="",
+            stream_id="stream-1",
+            chat_id="stream-1",
+            platform="qq",
+        )
+
+        self.assertEqual(
+            {
+                "success": False,
+                "content": "设置失败：无法确认指定的群成员，请直接 @ 对方",
+            },
+            result,
+        )
+        self.api_call.assert_not_awaited()
 
     async def test_missing_anchor_message_fails_closed(self) -> None:
         plugin = self.make_plugin(

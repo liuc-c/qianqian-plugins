@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "com.liuc-c.qianqian-plugins",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "name": "仟仟自用插件",
-  "description": "为仟仟提供本人或指定成员 QQ 群专属头衔与概率复读能力的 MaiBot 插件。",
+  "description": "为仟仟提供 QQ 群专属头衔、概率复读、消息贴表情与 Planner 活跃提示的 MaiBot 插件。",
   "author": {
     "name": "liuc-c",
     "url": "https://github.com/liuc-c"
@@ -13,7 +13,7 @@
     "repository": "https://github.com/liuc-c/qianqian-plugins"
   },
   "host_application": {
-    "min_version": "1.0.0",
+    "min_version": "1.2.4",
     "max_version": "1.99.99"
   },
   "sdk": {
@@ -24,7 +24,7 @@
     {
       "type": "plugin",
       "id": "maibot-team.napcat-adapter",
-      "version_spec": ">=1.0.1,<2.0.0"
+      "version_spec": ">=1.2.0,<2.0.0"
     }
   ],
   "plugin_type": "tool",
@@ -36,7 +36,10 @@
   },
   "capabilities": [
     "api.call",
+    "chat.get_group_streams",
+    "llm.generate",
     "message.get_by_id",
+    "message.get_recent",
     "send.hybrid",
     "send.text"
   ],

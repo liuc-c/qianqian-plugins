@@ -88,13 +88,18 @@ class PluginTestCase(IsolatedAsyncioTestCase):
 
 
 class PluginContractTests(PluginTestCase):
-    def test_group_title_and_repeater_components_are_registered(self) -> None:
+    def test_plugin_components_are_registered(self) -> None:
         components = QianqianPlugin().get_components()
 
         self.assertEqual(
             {
                 ("COMMAND", "qianqian_set_group_title_command"),
+                ("HOOK_HANDLER", "qianqian_message_reaction"),
+                ("HOOK_HANDLER", "qianqian_planner_engagement"),
                 ("HOOK_HANDLER", "qianqian_repeater"),
+                ("HOOK_HANDLER", "qianqian_reply_status_finish"),
+                ("HOOK_HANDLER", "qianqian_reply_status_start"),
+                ("TOOL", "qianqian_msg_react"),
                 ("TOOL", "qianqian_set_group_title"),
             },
             {(component["type"], component["name"]) for component in components},
@@ -111,6 +116,28 @@ class PluginContractTests(PluginTestCase):
         )
         self.assertEqual("blocking", repeater["metadata"]["mode"])
 
+        reaction = next(
+            component
+            for component in components
+            if component["name"] == "qianqian_message_reaction"
+        )
+        self.assertEqual(
+            "chat.receive.after_process",
+            reaction["metadata"]["hook"],
+        )
+        self.assertEqual("observe", reaction["metadata"]["mode"])
+
+        planner = next(
+            component
+            for component in components
+            if component["name"] == "qianqian_planner_engagement"
+        )
+        self.assertEqual(
+            "maisaka.planner.before_request",
+            planner["metadata"]["hook"],
+        )
+        self.assertEqual("blocking", planner["metadata"]["mode"])
+
     def test_repeater_is_disabled_by_default(self) -> None:
         self.assertEqual(
             {
@@ -120,6 +147,28 @@ class PluginContractTests(PluginTestCase):
             },
             QianqianPlugin.build_default_config()["repeater"],
         )
+
+    def test_message_reaction_is_disabled_by_default(self) -> None:
+        config = QianqianPlugin.build_default_config()["message_reaction"]
+
+        self.assertFalse(config["enabled"])
+        self.assertTrue(config["proactive_enabled"])
+        self.assertEqual(0.4, config["normal_probability"])
+        self.assertEqual(0.75, config["keyword_probability"])
+        self.assertEqual(180, config["cooldown_seconds"])
+        self.assertEqual([], config["enabled_group_ids"])
+        self.assertEqual("planner", config["llm_model"])
+        self.assertTrue(config["status_enabled"])
+        self.assertEqual(1.5, config["thinking_delay_seconds"])
+        self.assertEqual(120, config["thinking_timeout_seconds"])
+
+    def test_planner_engagement_is_disabled_by_default(self) -> None:
+        config = QianqianPlugin.build_default_config()["planner_engagement"]
+
+        self.assertFalse(config["enabled"])
+        self.assertEqual([], config["enabled_group_ids"])
+        self.assertIn("send_voice_reply", config["voice_instruction"])
+        self.assertIn("attach_emoji", config["emoji_instruction"])
 
     def test_setting_other_members_is_denied_by_default(self) -> None:
         self.assertEqual(
@@ -149,7 +198,7 @@ class PluginContractTests(PluginTestCase):
         tool = next(
             component
             for component in QianqianPlugin().get_components()
-            if component["type"] == "TOOL"
+            if component["name"] == "qianqian_set_group_title"
         )
         metadata = tool["metadata"]
         detailed_description = metadata["detailed_description"]

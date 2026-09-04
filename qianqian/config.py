@@ -3,6 +3,13 @@
 from maibot_sdk import Field, PluginConfigBase
 
 
+DEFAULT_EMOJI_INSTRUCTION = (
+    "在纯情绪回应，或文字回复后确实需要额外加强语气时，可以主动使用表情包。"
+    "表情内容使用简短的情绪或画面描述，例如“开心”“无语”“疑惑”“笑哭”。"
+    "不必每次使用，每轮最多一个，避免连续刷屏，但也不要长期完全不用。"
+)
+
+
 class PluginSectionConfig(PluginConfigBase):
     """插件基础配置。"""
 
@@ -11,7 +18,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_order__ = 0
 
     enabled: bool = Field(default=False, description="是否启用插件")
-    config_version: str = Field(default="0.5.0", description="配置版本")
+    config_version: str = Field(default="0.5.1", description="配置版本")
 
 
 class RepeaterSectionConfig(PluginConfigBase):
@@ -116,12 +123,8 @@ class PlannerEngagementSectionConfig(PluginConfigBase):
         description="追加到 send_voice_reply 工具描述中的 Planner 指令",
     )
     emoji_instruction: str = Field(
-        default=(
-            "当文字回复适合用表情包加强情绪时，可以主动填写 attach_emoji，内容使用简短的"
-            "情绪或表情描述，例如“开心”“无语”“疑惑”“笑哭”。不必每次使用，但不要长期"
-            "完全不用。"
-        ),
-        description="追加到回复表情包参数中的 Planner 指令",
+        default=DEFAULT_EMOJI_INSTRUCTION,
+        description="追加到当前可用表情包工具中的使用时机与频率指令",
     )
 
 

@@ -168,7 +168,8 @@ class PluginContractTests(PluginTestCase):
         self.assertFalse(config["enabled"])
         self.assertEqual([], config["enabled_group_ids"])
         self.assertIn("send_voice_reply", config["voice_instruction"])
-        self.assertIn("attach_emoji", config["emoji_instruction"])
+        self.assertIn("主动使用表情包", config["emoji_instruction"])
+        self.assertIn("每轮最多一个", config["emoji_instruction"])
 
     def test_setting_other_members_is_denied_by_default(self) -> None:
         self.assertEqual(

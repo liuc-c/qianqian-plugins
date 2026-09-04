@@ -6,9 +6,18 @@ import asyncio
 from collections.abc import Mapping, MutableMapping
 from typing import Any
 
-from .config import PlannerEngagementSectionConfig
+from .config import DEFAULT_EMOJI_INSTRUCTION, PlannerEngagementSectionConfig
 
 _CHAT_LOOKUP_TIMEOUT_SECONDS = 5
+_LEGACY_EMOJI_INSTRUCTION = (
+    "当文字回复适合用表情包加强情绪时，可以主动填写 attach_emoji，内容使用简短的"
+    "情绪或表情描述，例如“开心”“无语”“疑惑”“笑哭”。不必每次使用，但不要长期"
+    "完全不用。"
+)
+_STANDALONE_EMOJI_PREFIX = (
+    "调用 send_emoji 会把表情包作为独立消息发送，与 reply 的文字消息分开。"
+)
+_ATTACHED_EMOJI_PREFIX = "填写 attach_emoji 会把表情包附在本轮文字回复中。"
 
 
 class PlannerEngagementModule:
@@ -56,12 +65,37 @@ class PlannerEngagementModule:
                     function,
                     config.voice_instruction,
                 )
+            if name == "send_emoji":
+                changed |= self._append_description(
+                    function,
+                    self._emoji_instruction(
+                        config.emoji_instruction,
+                        standalone=True,
+                    ),
+                )
             if name == "reply":
                 changed |= self._enhance_reply_emoji(
                     function,
-                    config.emoji_instruction,
+                    self._emoji_instruction(
+                        config.emoji_instruction,
+                        standalone=False,
+                    ),
                 )
         return changed
+
+    @staticmethod
+    def _emoji_instruction(instruction: str, *, standalone: bool) -> str:
+        """为独立或丰富回复表情包生成不冲突的工具提示。"""
+        usage = instruction.strip()
+        if usage == _LEGACY_EMOJI_INSTRUCTION:
+            usage = DEFAULT_EMOJI_INSTRUCTION
+        if standalone:
+            usage = usage.replace("填写 attach_emoji", "调用 send_emoji")
+            usage = usage.replace("attach_emoji", "send_emoji")
+            prefix = _STANDALONE_EMOJI_PREFIX
+        else:
+            prefix = _ATTACHED_EMOJI_PREFIX
+        return f"{prefix}{usage}"
 
     async def _resolve_group_id(self, ctx: Any, session_id: str) -> str:
         """通过 SDK 群聊流能力把内部 session_id 映射成 QQ 群号。"""

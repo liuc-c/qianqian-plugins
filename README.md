@@ -13,7 +13,7 @@
 - LLM 分流：仅在复读消息确认发送成功后截断触发消息的常规 Command、Planner 和 LLM 流程；其他情况正常放行。
 - 消息贴表情：LLM 可以调用 `qianqian_msg_react` 给当前群最近消息添加 QQ 反应表情；也可以在普通群聊中按概率旁路主动贴表情。
 - 回复状态：Planner 确定回复或设置头衔后，耗时超过阈值才显示“托腮”；普通回复发送后撤销，头衔设置成功后替换为 OK。
-- Planner 活跃提示：按 QQ 群增强 `send_voice_reply` 和 `reply.attach_emoji` 的工具说明，让 Planner 更主动地使用语音回复和回复附带表情包。
+- Planner 活跃提示：按 QQ 群增强 `send_voice_reply` 和当前可用的表情包工具；关闭丰富回复时使用 `send_emoji`，让文字与表情包分成两条消息。
 
 ## 前置条件
 
@@ -41,7 +41,7 @@ git clone https://github.com/liuc-c/qianqian-plugins.git plugins/qianqian-plugin
 | 分组 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `plugin` | `enabled` | `false` | 是否启用插件 |
-| `plugin` | `config_version` | `0.5.0` | 配置结构版本 |
+| `plugin` | `config_version` | `0.5.1` | 配置结构版本 |
 | `group_title` | `allow_all_members_to_set_others` | `false` | 是否允许所有群成员请求修改其他成员头衔 |
 | `group_title` | `allowed_requester_ids` | `[]` | 可请求修改他人头衔的 QQ 号；修改本人不受限制 |
 | `repeater` | `enabled` | `false` | 是否单独启用 QQ 群复读 |
@@ -61,7 +61,7 @@ git clone https://github.com/liuc-c/qianqian-plugins.git plugins/qianqian-plugin
 | `planner_engagement` | `enabled` | `false` | 是否增强 Planner 的语音和表情包提示 |
 | `planner_engagement` | `enabled_group_ids` | `[]` | 应用提示的群号；空列表表示全部 QQ 群 |
 | `planner_engagement` | `voice_instruction` | 见默认配置 | 追加到 `send_voice_reply` 工具描述的指令 |
-| `planner_engagement` | `emoji_instruction` | 见默认配置 | 追加到 `reply.attach_emoji` 的指令 |
+| `planner_engagement` | `emoji_instruction` | 见默认配置 | 追加到当前可用表情包工具的使用时机与频率指令 |
 
 `config.toml` 是当前安装实例的运行时配置，不应提交到 Git。
 
@@ -85,7 +85,7 @@ llm_model = "planner"
 enabled = true
 enabled_group_ids = ["123456789"]
 voice_instruction = "在问候、撒娇、安慰、讲故事、情绪鲜明或适合口语表达的场景中，可以主动使用 send_voice_reply，不必等待用户明确要求。语音应简短自然，不连续多次使用；发送语音后不要再发送内容重复的文字回复。"
-emoji_instruction = "当文字回复适合用表情包加强情绪时，可以主动填写 attach_emoji，内容使用简短的情绪或表情描述，例如‘开心’‘无语’‘疑惑’‘笑哭’。不必每次使用，但不要长期完全不用。"
+emoji_instruction = "在纯情绪回应，或文字回复后确实需要额外加强语气时，可以主动使用表情包。表情内容使用简短的情绪或画面描述，例如‘开心’‘无语’‘疑惑’‘笑哭’。不必每次使用，每轮最多一个，避免连续刷屏，但也不要长期完全不用。"
 ```
 
 ## 使用方式
@@ -164,7 +164,8 @@ Tool 还会要求 Host 注入的 `stream_id` 与 `chat_id` 一致，并只在该
 消息贴表情与发送表情包是两套能力：
 
 - `qianqian_msg_react` 和主动贴表情会调用 NapCat 的 `set_msg_emoji_like`，把小表情显示在某条群消息下方。
-- `reply.attach_emoji` 会随机器人的文字回复发送一张表情包图片。
+- 关闭 MaiBot 丰富回复后，`send_emoji` 会把表情包作为一条独立消息发送，与 `reply` 的文字消息分开。
+- 开启丰富回复时，`reply.attach_emoji` 会把表情包附在机器人的文字回复中。
 
 主动贴表情订阅 MaiBot 1.x 实际发射的 `chat.receive.after_process` Hook，并使用 `OBSERVE` 旁路模式，因此不会中止或延迟正常 Command、Planner 与 LLM 流程。一次成功后才开始计算冷却；插件重载或重启会清空内存中的冷却和去重状态。
 
@@ -179,10 +180,11 @@ Tool 只能选择当前群最近消息列表中真实存在的消息 ID。目标
 
 ### Planner 语音与表情包提示
 
-群专属 `chat_prompts` 在当前 MaiBot 1.2.4 中主要进入 Replyer，无法稳定影响 Planner 对工具的选择。本插件改在 `maisaka.planner.before_request` 修改本轮工具定义：
+群专属 `chat_prompts` 在当前 MaiBot 1.2.x 中主要进入 Replyer，无法稳定影响 Planner 对工具的选择。本插件改在 `maisaka.planner.before_request` 修改本轮工具定义：
 
 - 为 `send_voice_reply` 追加主动使用语音的提示；未安装或未启用对应语音插件时不会创建这个工具。
-- 为 `reply.attach_emoji` 追加主动附带表情包的提示；需要保持 MaiBot 的丰富回复功能开启。
+- 关闭 MaiBot 丰富回复时，为独立的 `send_emoji` 追加主动发送提示，文字和表情包会分成两条消息；这是本插件推荐的使用方式。
+- 如果重新开启丰富回复，插件仍兼容 `reply.attach_emoji`，但表情包会附在文字回复中。
 - 只修改 `enabled_group_ids` 匹配的 QQ 群；不改全局人格、不写回聊天历史，也不修改 MaiBot 主程序文件。
 
 提示只提高 LLM 选择概率，不保证每轮一定使用。语音合成能否成功仍取决于语音插件自身的 API Key、音色模式和服务状态；表情包发送则要求 MaiBot 表情库中存在可用表情。
@@ -249,7 +251,7 @@ uv run --no-project --with 'maibot-plugin-sdk>=2.5.1,<3.0.0' \
 8. 复读概率为 `0.0`、群不在白名单或复读功能关闭时，机器人不参与复读。
 9. 启用消息贴表情并把普通概率设为 `1.0`，目标群新消息会在 NapCat 中得到一个反应表情，同时正常 Planner 流程不受影响。
 10. 让 LLM 调用 `qianqian_msg_react`，确认只能操作当前群最近消息，跨群或不存在的消息 ID 会被拒绝。
-11. 启用 Planner 活跃提示后，从 Planner 监控中确认 `send_voice_reply` 描述和 `reply.attach_emoji` 参数描述包含配置的附加指令。
+11. 关闭丰富回复并启用 Planner 活跃提示后，从 Planner 监控中确认 `send_voice_reply` 与 `send_emoji` 的描述包含配置的附加指令，并确认文字、表情包分开发送。
 12. 普通回复超过状态延迟时先出现托腮，消息发出后托腮消失；快速回复不闪烁托腮。
 13. 头衔设置成功后请求消息只有一个 OK；失败时没有 OK，并继续收到原有文字错误说明。
 

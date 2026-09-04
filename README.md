@@ -17,7 +17,7 @@
 
 ## 前置条件
 
-- MaiBot Host `1.2.4`～`1.x`
+- MaiBot Host `1.2.3`～`1.x`
 - `maibot-plugin-sdk` `2.5.1`～`2.x`
 - [MaiBot NapCat Adapter](https://github.com/MaiM-with-u/MaiBot-Napcat-Adapter) `1.2.0`～`1.x`
 - 运行 NapCat 的机器人 QQ 必须是当前群群主

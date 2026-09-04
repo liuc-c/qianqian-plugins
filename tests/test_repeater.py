@@ -73,9 +73,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             },
         }
 
-    async def test_two_members_trigger_one_exact_repeat_without_stopping_llm(
-        self,
-    ) -> None:
+    async def test_two_members_trigger_one_exact_repeat_and_stop_llm(self) -> None:
         plugin = self.make_plugin()
 
         first = await plugin.handle_repeater_message(
@@ -89,8 +87,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", first["action"])
-        self.assertEqual("continue", second["action"])
-        self.assertIn("message", second["modified_kwargs"])
+        self.assertEqual("abort", second["action"])
         self.assertEqual("continue", third["action"])
         self.send_text.assert_awaited_once_with("哈哈", "qq-group-1000")
         self.send_hybrid.assert_not_awaited()
@@ -124,7 +121,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual("continue", result["action"])
+        self.assertEqual("abort", result["action"])
         self.send_hybrid.assert_awaited_once_with(segments, "qq-group-1000")
         self.send_text.assert_not_awaited()
 
@@ -150,7 +147,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", after_image["action"])
-        self.assertEqual("continue", next_member["action"])
+        self.assertEqual("abort", next_member["action"])
         self.send_text.assert_awaited_once_with("哈哈", "qq-group-1000")
 
     async def test_commands_never_enter_a_repeat_queue(self) -> None:
@@ -211,7 +208,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual("continue", result["action"])
+        self.assertEqual("abort", result["action"])
         self.send_hybrid.assert_awaited_once_with(segments, "qq-group-1000")
 
     async def test_same_member_does_not_reach_the_repeat_threshold(self) -> None:
@@ -228,7 +225,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", same_member["action"])
-        self.assertEqual("continue", another_member["action"])
+        self.assertEqual("abort", another_member["action"])
         self.send_text.assert_awaited_once_with("哈哈", "qq-group-1000")
 
     async def test_failed_repeat_roll_is_not_retried_in_the_same_queue(self) -> None:
@@ -260,7 +257,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", expired["action"])
-        self.assertEqual("continue", fresh_second_member["action"])
+        self.assertEqual("abort", fresh_second_member["action"])
 
     async def test_whitespace_is_compared_exactly(self) -> None:
         plugin = self.make_plugin()
@@ -276,7 +273,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", different["action"])
-        self.assertEqual("continue", same["action"])
+        self.assertEqual("abort", same["action"])
         self.send_text.assert_awaited_once_with("哈哈 ", "qq-group-1000")
 
     async def test_send_failure_keeps_the_normal_message_pipeline_running(self) -> None:
@@ -338,7 +335,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("continue", self_message["action"])
-        self.assertEqual("continue", member_message["action"])
+        self.assertEqual("abort", member_message["action"])
         self.send_text.assert_awaited_once_with("哈哈", "qq-group-1000")
 
     async def test_concurrent_members_still_produce_only_one_repeat(self) -> None:
@@ -356,7 +353,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             ),
         )
 
-        self.assertEqual(["continue", "continue"], [item["action"] for item in results])
+        self.assertEqual(["abort", "continue"], [item["action"] for item in results])
         self.send_text.assert_awaited_once_with("哈哈", "qq-group-1000")
 
     async def test_queue_identity_is_the_qq_group_not_the_stream(self) -> None:
@@ -379,7 +376,7 @@ class RepeaterHookTests(IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual("continue", result["action"])
+        self.assertEqual("abort", result["action"])
         self.send_text.assert_awaited_once_with(
             "哈哈",
             "qq-account-b-group-1000",
